@@ -3,11 +3,33 @@ import asyncio
 from bs4 import BeautifulSoup
 import re
 import numpy as np
+from urllib.parse import urlparse
 
 class DogProductsScraper:
     def __init__(self, max_tabs: int):
         self.sem =  asyncio.Semaphore(max_tabs)
 
+
+    async def scrape_product(self, context, url):
+        async with self.sem:
+            page = await context.new_page()
+            await page.goto(url)
+            html = await page.content()
+            soup = BeautifulSoup(html, "html.parser")
+            image_gallery = soup.select_one(".gallery-thumb")
+            parsed_url = urlparse(url)
+            image_urls = []
+            base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+            for img in image_gallery.find_all("img"):
+                img_src = img["src"]
+                if not img_src.startswith("http"):
+                    img_src = img_src.lstrip("./")
+                    image_url  = f"{base_url}/{img_src}" 
+                    image_urls.append(image_url)
+                else:  
+                    image_urls.append(img_src)
+            print(image_urls) 
+                                      
     async def scrape_products_from_category(self, context, category_link):
         async with self.sem:
             page = await context.new_page()  
@@ -25,7 +47,6 @@ class DogProductsScraper:
                     max_page_number = int(a_tags[-2].text)
                 else:
                     max_page_number = 0
-            print(max_page_number)
             all_page_product_urls = []
             while True:
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
@@ -57,10 +78,13 @@ class DogProductsScraper:
             soup = BeautifulSoup(html, 'html.parser')
             category_links = [c.find("a")["href"] for c in soup.select(".category-item")]
             all_product_urls = []
-            for category_link in category_links: 
+            for category_link in category_links[3:4]: 
                  product_urls = await self.scrape_products_from_category(context, category_link)
                  all_product_urls.extend(product_urls)
             product_urls = list(set(all_product_urls))
+            for product_url in product_urls:  
+                await self.scrape_product(context, product_url)
+
 
 
                 
@@ -68,4 +92,14 @@ class DogProductsScraper:
 
 
 
-asyncio.run(DogProductsScraper(max_tabs=10).run_scraper())
+#asyncio.run(DogProductsScraper(max_tabs=10).run_scraper())
+
+async def test():
+    dog_product_scraper = DogProductsScraper(max_tabs=10)
+    async with async_playwright() as playwright:
+        browser  = await playwright.chromium.launch(headless=False)
+        context = await browser.new_context()
+        await dog_product_scraper.scrape_product(context,"https://www.absolutepets.com/shop/product/dog-bowls/zeedog-bowl-stripes-clay")
+
+
+asyncio.run(test())         
